@@ -64,10 +64,10 @@ type ScanResult struct {
 func main() {
 	// define some flags
 	dataFlag := flag.String("d", "", "Target input: single IP, single domain/URL, or path to a file containing targets")
-	localFile := flag.String("f", "", "Path to a local ServiceTags_Public.json file (offline mode)")
-	subID := flag.String("s", os.Getenv("AZURE_SUBSCRIPTION_ID"), "Azure Subscription ID (enables API mode)")
-	location := flag.String("l", "eastus", "Azure region to query (API mode only)")
-	timeout := flag.Duration("t", 30*time.Second, "Timeout duration for network operations")
+	localFile := flag.String("f", "", "Path to a local ServiceTags_Public.json file (skips scraping/API lookup)")
+	subID := flag.String("s", os.Getenv("AZURE_SUBSCRIPTION_ID"), "Azure Subscription ID (Auth mode)")
+	location := flag.String("l", "eastus", "Azure region to query (With auth only)")
+	timeout := flag.Duration("t", 30*time.Second, "Timeout duration for network and DNS operations")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Azure Service Tag & IP Range Checker\n\n")
