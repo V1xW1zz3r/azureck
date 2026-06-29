@@ -65,6 +65,8 @@ azureck -d list.txt
 ```
 
 ### 4. Authenticated Azure API Mode
+If you want the region lists (**usgov** and **china**) I made a table for it. This be found in my notes [here](https://vix-w1zzer.gitbook.io/vixwizzer/notes/cloud/azure/tool-azureck#authenticated-through-azure-api)
+
 Requires the Azure CLI to be authenticated first. Use `-l` if your subscription restricts control-plane queries to specific regions or if you are scanning within a sovereign/private cloud (e.g., Azure Gov):
 ```bash
 az login
