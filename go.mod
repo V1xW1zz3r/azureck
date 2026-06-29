@@ -1,4 +1,4 @@
-module azureck
+module github.com/V1xW1zz3r/azureck
 
 go 1.25.0
 
