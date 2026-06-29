@@ -81,3 +81,8 @@ Directly scan against a pre-downloaded offline `ServiceTags_Public.json` file:
 ```bash
 azureck -f ServiceTags_Public_20260622.json -d 20.60.120.10
 ```
+
+---
+
+### Need more feature? Not satisfied?
+You are highly encouraged to suggest features, report bugs, or open a pull request/issue thingie.. idk
