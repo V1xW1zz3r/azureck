@@ -40,7 +40,7 @@ Flags:
   -d    Target input: single IP, single domain/URL, or path to a file containing targets (default: "")
   -f    Path to a local ServiceTags_Public.json file (skips scraping/API lookup) (default: "")
   -s    Azure Subscription ID (Auth mode) (default: "")
-  -l    Azure region/location to query (With auth only) (default: "eastus")
+  -l    Azure region to query (With auth only) (default: "eastus")
   -t    Timeout duration for network and DNS operations (default: 30s)
   -h    Display help options
 ```
