@@ -1,8 +1,8 @@
-# Azure Service Tag & IP Range Checker
+# azureck: Azure Service Tag & IP Range Checker
 
-A simple CLI tool written in Go to map out IP addresses, domain names, or bulk target lists to official Azure Service Tags, system services, and geographic regions. 
+A Go CLI tool to check if an IP address, domain, or target list belongs to Microsoft Azure Service Tags, CIDR ranges, and geographic regions. 
 
-This tool serves threat hunting, security operations (SecOps), and firewall audits by identifying whether incoming or outgoing traffic belongs to legitimate Microsoft Azure infrastructure.
+Easily perform Azure IP lookups, reverse DNS scans, and bulk threat hunting queries to verify if incoming or outgoing traffic originates from legitimate Microsoft Azure infrastructure (such as Azure Blob Storage, Azure Front Door, or App Services, etc).
 
 ---
 
@@ -17,12 +17,12 @@ This tool serves threat hunting, security operations (SecOps), and firewall audi
 
 ## Installation
 
-### Method 1: Direct Go Installation
+### Direct Go Installation
 ```bash
 go install github.com/V1xW1zz3r/azureck@latest
 ```
 
-### Method 2: Manual Compilation
+### Manual Compilation
 ```bash
 git clone https://github.com/V1xW1zz3r/azureck.git
 cd azureck
