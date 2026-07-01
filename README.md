@@ -86,5 +86,9 @@ azureck -f ServiceTags_Public_20260622.json -d 20.60.120.10
 
 ---
 
+## Acknowledgments
+
+This project was inspired by [cloudipchecker](https://github.com/deanobalino/cloudipchecker). Because the original tool is currently unmaintained and legacy Azure SDK dependencies have changed, `azureck` was written from the ground up as a modern, high-performance alternative using the current Azure SDK for Go.
+
 ### Need more feature? Not satisfied?
 You are highly encouraged to suggest features, report bugs, or open a pull request/issue thingie.. idk
