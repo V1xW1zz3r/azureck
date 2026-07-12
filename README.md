@@ -2,7 +2,7 @@
 
 A Go CLI tool to check if an IP address, domain, or target list belongs to Microsoft Azure Service Tags, CIDR ranges, and geographic regions. 
 
-Easily perform Azure IP lookups, reverse DNS scans, and bulk threat hunting queries to verify if incoming or outgoing traffic originates from legitimate Microsoft Azure infrastructure (such as Azure Blob Storage, Azure Front Door, or App Services, etc).
+Easily perform Azure IP lookups, reverse DNS scans, and bulk enumeration queries to verify if incoming or outgoing traffic originates from legitimate Microsoft Azure infrastructure (such as Azure Blob Storage, Azure Front Door, or App Services, etc).
 
 ---
 
