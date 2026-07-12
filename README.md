@@ -1,6 +1,7 @@
 # azureck: Azure Service Tag & IP Range Checker
 
 A recon tool to map out IP addresses, domain names, or bulk target lists to official Azure Service Tags, system services, and geographic regions.
+
 It will do IP lookups, reverse DNS scans, and bulk enumeration queries to verify if incoming or outgoing traffic originates from legitimate Microsoft Azure infrastructure (such as Azure Blob Storage, Azure Front Door, or App Services, etc).
 
 ---
