@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"text/tabwriter"
 	"time"
 
@@ -22,7 +23,36 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork"
 )
 
+type CloudDefinition struct {
+	Name         string
+	DownloadID   string
+	RegexPattern string
+	CacheFile    string
+}
+
+var allClouds = []CloudDefinition{ 
+	{
+		Name:         "Public",
+		DownloadID:   "56519",
+		RegexPattern: `https://download\.microsoft\.com/download/[A-Fa-f0-9/_-]+/ServiceTags_Public_\d{8}\.json`,
+		CacheFile:    "service_tags_public.json",
+	},
+	{
+		Name:         "USGov",
+		DownloadID:   "57063",
+		RegexPattern: `https://download\.microsoft\.com/download/[A-Fa-f0-9/_-]+/ServiceTags_AzureGovernment_\d{8}\.json`,
+		CacheFile:    "service_tags_usgov.json",
+	},
+	{
+		Name:         "China",
+		DownloadID:   "57062",
+		RegexPattern: `https://download\.microsoft\.com/download/[A-Fa-f0-9/_-]+/ServiceTags_China_\d{8}\.json`,
+		CacheFile:    "service_tags_china.json",
+	},
+}
+
 type ServiceTag struct {
+	Cloud         string   `json:"cloud"`
 	Name          string   `json:"name"`
 	ID            string   `json:"id"`
 	Region        string   `json:"region"`
@@ -31,6 +61,7 @@ type ServiceTag struct {
 }
 
 type PublicJSONTags struct {
+	Cloud  string `json:"cloud"`
 	Values []struct {
 		Name       string `json:"name"`
 		ID         string `json:"id"`
@@ -43,6 +74,7 @@ type PublicJSONTags struct {
 }
 
 type MatchedTag struct {
+	Cloud         string
 	Name          string
 	Region        string
 	MatchedRange  string
@@ -51,7 +83,7 @@ type MatchedTag struct {
 
 type ResolvedTarget struct {
 	IP      string
-	Sources []string // track domains/files that led to the IP
+	Sources []string
 }
 
 type ScanResult struct {
@@ -62,12 +94,11 @@ type ScanResult struct {
 }
 
 func main() {
-	// define some flags
 	dataFlag := flag.String("d", "", "Target input: single IP, single domain/URL, or path to a file containing targets")
-	localFile := flag.String("f", "", "Path to a local ServiceTags_Public.json file (skips scraping/API lookup)")
+	localFile := flag.String("f", "", "Path to a local ServiceTags.json file (offline mode)")
 	subID := flag.String("s", os.Getenv("AZURE_SUBSCRIPTION_ID"), "Azure Subscription ID (Auth mode)")
 	location := flag.String("l", "eastus", "Azure region to query (With auth only)")
-	timeout := flag.Duration("t", 30*time.Second, "Timeout duration for network and DNS operations")
+	timeout := flag.Duration("t", 45*time.Second, "Timeout duration for network, DNS, and scraping operations")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Azure Service Tag & IP Range Checker\n\n")
@@ -80,12 +111,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\nExamples:\n")
 		fmt.Fprintf(os.Stderr, "  - Scan a single IP address:\n")
 		fmt.Fprintf(os.Stderr, "    ./azureck -d 20.60.120.10\n\n")
-		fmt.Fprintf(os.Stderr, "  - Scan a domain name (automatic resolution):\n")
+		fmt.Fprintf(os.Stderr, "  - Scan a domain name:\n")
 		fmt.Fprintf(os.Stderr, "    ./azureck -d portal.azure.com\n\n")
-		fmt.Fprintf(os.Stderr, "  - Bulk scan using a target file list:\n")
-		fmt.Fprintf(os.Stderr, "    ./azureck -d ips_and_domains.txt\n\n")
-		fmt.Fprintf(os.Stderr, "  - Execute in offline mode with a downloaded JSON:\n")
-		fmt.Fprintf(os.Stderr, "    ./azureck -f ServiceTags_Public_20260622.json -d 20.60.120.10\n")
+		fmt.Fprintf(os.Stderr, "  - Bulk scan from a file list:\n")
+		fmt.Fprintf(os.Stderr, "    ./azureck -d targets.txt\n\n")
+		fmt.Fprintf(os.Stderr, "  - Authenticated Azure Control Plane query:\n")
+		fmt.Fprintf(os.Stderr, "    ./azureck -s \"<subID>\" -l \"eastus\" -d 150.171.84.20\n")
 	}
 
 	flag.Parse()
@@ -99,7 +130,6 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
-	// get targets (Files, IPs, and Domains)
 	targets, err := gatherTargets(ctx, *dataFlag)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[!] Error parsing targets: %v\n", err)
@@ -111,17 +141,22 @@ func main() {
 		os.Exit(1)
 	}
 
-	// load service tag database
 	tags, err := loadServiceTags(ctx, *localFile, *subID, *location)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[!] Error loading service tags: %v\n", err)
 		if *subID != "" && strings.Contains(err.Error(), "failed to acquire a token") {
-			fmt.Println("\nTo use API mode (-s), you must be authenticated. Please run 'az login' locally or pass a local file with '-f' to run offline.")
+			fmt.Println("\nTo use API mode (-s), authenticate first with 'az login' or run without '-s' to use offline multi-cloud mode.")
 		}
 		os.Exit(1)
 	}
 
-	fmt.Println("[*] Matching targets against Azure Service Tags...")
+	totalPrefixes := 0
+	for _, tag := range tags {
+		totalPrefixes += len(tag.IPPrefixes)
+	}
+
+	fmt.Printf("[*] Matching %d targets against %d Service Tags (%d total CIDR prefixes) across all clouds...\n\n", len(targets), len(tags), totalPrefixes)
+
 	var results []ScanResult
 	for _, target := range targets {
 		res, err := scanIP(target.IP, tags)
@@ -139,7 +174,6 @@ func main() {
 func gatherTargets(ctx context.Context, input string) ([]ResolvedTarget, error) {
 	var rawInputs []string
 
-	// check if the input points to a valid file on disk
 	info, err := os.Stat(input)
 	if err == nil && !info.IsDir() {
 		file, err := os.Open(input)
@@ -231,64 +265,80 @@ func resolveDomain(ctx context.Context, rawURL string) (string, []string, error)
 
 func loadServiceTags(ctx context.Context, localFile, subscriptionID, location string) ([]ServiceTag, error) {
 	if localFile != "" {
-		fmt.Printf("[*] Mode: Offline (Using file: %s)\n", localFile)
-		return loadFromJSONFile(localFile)
+		fmt.Printf("[*] Mode: Offline (Using custom file: %s)\n", localFile)
+		return loadFromJSONFile(localFile, "Custom")
 	}
 
 	if subscriptionID != "" {
-		fmt.Printf("[*] Mode: Azure API (Subscription: %s)\n", subscriptionID)
+		fmt.Printf("[*] Mode: Azure API (Subscription: %s, Region: %s)\n", subscriptionID, location)
 		return fetchTagsFromARM(ctx, subscriptionID, location)
 	}
 
-	cachePath, err := getCacheFilePath()
+	return loadAllCloudsConcurrent(ctx)
+}
+
+func loadAllCloudsConcurrent(ctx context.Context) ([]ServiceTag, error) {
+	var (
+		wg        sync.WaitGroup
+		mu        sync.Mutex
+		allTags   []ServiceTag
+		errorList []string
+	)
+
+	cacheDir, err := getCacheDir()
 	if err != nil {
 		return nil, err
 	}
 
+	for _, cloud := range allClouds {
+		wg.Add(1)
+		go func(c CloudDefinition) {
+			defer wg.Done()
+
+			cachePath := filepath.Join(cacheDir, c.CacheFile)
+			tags, err := loadOrFetchSingleCloud(ctx, c, cachePath)
+
+			mu.Lock()
+			defer mu.Unlock()
+
+			if err != nil {
+				errorList = append(errorList, fmt.Sprintf("%s: %v", c.Name, err))
+				return
+			}
+			allTags = append(allTags, tags...)
+		}(cloud)
+	}
+
+	wg.Wait()
+
+	if len(allTags) == 0 && len(errorList) > 0 {
+		return nil, fmt.Errorf("all cloud syncs failed: %s", strings.Join(errorList, "; "))
+	}
+
+	return allTags, nil
+}
+
+func loadOrFetchSingleCloud(ctx context.Context, cloud CloudDefinition, cachePath string) ([]ServiceTag, error) {
 	if info, err := os.Stat(cachePath); err == nil {
 		if time.Since(info.ModTime()) < 7*24*time.Hour {
-			fmt.Printf("[*] Mode: Cache (Using local cache: %s)\n", cachePath)
-			return loadFromJSONFile(cachePath)
+			return loadFromJSONFile(cachePath, cloud.Name)
 		}
 	}
 
-	fmt.Println("[*] Cache is empty/stale. Scraping Microsoft Download Center...")
-	downloadURL, err := scrapeDownloadURL(ctx)
+	downloadURL, err := scrapeDownloadURL(ctx, cloud)
 	if err != nil {
-		return nil, fmt.Errorf("scraping failed: %w", err)
-	}
-
-	fmt.Printf("[*] Downloading service tags from: %s\n", downloadURL)
-	return downloadAndCacheTags(ctx, downloadURL, cachePath)
-}
-
-func loadFromJSONFile(path string) ([]ServiceTag, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	var raw PublicJSONTags
-	if err := json.NewDecoder(file).Decode(&raw); err != nil {
+		if _, statErr := os.Stat(cachePath); statErr == nil {
+			return loadFromJSONFile(cachePath, cloud.Name)
+		}
 		return nil, err
 	}
 
-	var tags []ServiceTag
-	for _, val := range raw.Values {
-		tags = append(tags, ServiceTag{
-			Name:          val.Name,
-			ID:            val.ID,
-			Region:        val.Properties.Region,
-			SystemService: val.Properties.SystemService,
-			IPPrefixes:    val.Properties.AddressPrefixes,
-		})
-	}
-	return tags, nil
+	return downloadAndCacheTags(ctx, downloadURL, cachePath, cloud.Name)
 }
 
-func scrapeDownloadURL(ctx context.Context) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", "https://www.microsoft.com/en-us/download/details.aspx?id=56519", nil)
+func scrapeDownloadURL(ctx context.Context, cloud CloudDefinition) (string, error) {
+	pageURL := fmt.Sprintf("https://www.microsoft.com/en-us/download/details.aspx?id=%s", cloud.DownloadID)
+	req, err := http.NewRequestWithContext(ctx, "GET", pageURL, nil)
 	if err != nil {
 		return "", err
 	}
@@ -301,7 +351,7 @@ func scrapeDownloadURL(ctx context.Context) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("microsoft download page returned status: %d", resp.StatusCode)
+		return "", fmt.Errorf("download page returned HTTP %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -309,16 +359,16 @@ func scrapeDownloadURL(ctx context.Context) (string, error) {
 		return "", err
 	}
 
-	re := regexp.MustCompile(`https://download\.microsoft\.com/download/[A-Fa-f0-9/_-]+/ServiceTags_Public_\d{8}\.json`)
+	re := regexp.MustCompile(cloud.RegexPattern)
 	match := re.FindString(string(body))
 	if match == "" {
-		return "", fmt.Errorf("regex failed to isolate download link")
+		return "", fmt.Errorf("regex pattern failed to locate download link for %s", cloud.Name)
 	}
 
 	return match, nil
 }
 
-func downloadAndCacheTags(ctx context.Context, url, cachePath string) ([]ServiceTag, error) {
+func downloadAndCacheTags(ctx context.Context, url, cachePath, cloudName string) ([]ServiceTag, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -330,7 +380,11 @@ func downloadAndCacheTags(ctx context.Context, url, cachePath string) ([]Service
 	}
 	defer resp.Body.Close()
 
-	tempFile, err := os.CreateTemp("", "azure_tags_*.json")
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("file download returned HTTP %d", resp.StatusCode)
+	}
+
+	tempFile, err := os.CreateTemp("", "azureck_*.json")
 	if err != nil {
 		return nil, err
 	}
@@ -348,7 +402,7 @@ func downloadAndCacheTags(ctx context.Context, url, cachePath string) ([]Service
 
 	var raw PublicJSONTags
 	if err := json.NewDecoder(tempFile).Decode(&raw); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("invalid JSON structure in %s download: %w", cloudName, err)
 	}
 
 	out, err := os.Create(cachePath)
@@ -365,9 +419,34 @@ func downloadAndCacheTags(ctx context.Context, url, cachePath string) ([]Service
 		return nil, err
 	}
 
+	return extractTags(raw, cloudName), nil
+}
+
+func loadFromJSONFile(path, cloudName string) ([]ServiceTag, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var raw PublicJSONTags
+	if err := json.NewDecoder(file).Decode(&raw); err != nil {
+		return nil, err
+	}
+
+	return extractTags(raw, cloudName), nil
+}
+
+func extractTags(raw PublicJSONTags, defaultCloud string) []ServiceTag {
+	cloud := defaultCloud
+	if raw.Cloud != "" {
+		cloud = raw.Cloud
+	}
+
 	var tags []ServiceTag
 	for _, val := range raw.Values {
 		tags = append(tags, ServiceTag{
+			Cloud:         cloud,
 			Name:          val.Name,
 			ID:            val.ID,
 			Region:        val.Properties.Region,
@@ -375,7 +454,7 @@ func downloadAndCacheTags(ctx context.Context, url, cachePath string) ([]Service
 			IPPrefixes:    val.Properties.AddressPrefixes,
 		})
 	}
-	return tags, nil
+	return tags
 }
 
 func fetchTagsFromARM(ctx context.Context, subscriptionID, location string) ([]ServiceTag, error) {
@@ -422,6 +501,7 @@ func fetchTagsFromARM(ctx context.Context, subscriptionID, location string) ([]S
 		}
 
 		tags = append(tags, ServiceTag{
+			Cloud:         "ARM",
 			Name:          name,
 			ID:            id,
 			Region:        region,
@@ -433,7 +513,7 @@ func fetchTagsFromARM(ctx context.Context, subscriptionID, location string) ([]S
 	return tags, nil
 }
 
-func getCacheFilePath() (string, error) {
+func getCacheDir() (string, error) {
 	userCache, err := os.UserCacheDir()
 	if err != nil {
 		return "", err
@@ -442,13 +522,13 @@ func getCacheFilePath() (string, error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "service_tags.json"), nil
+	return dir, nil
 }
 
 func scanIP(targetIPStr string, tags []ServiceTag) (ScanResult, error) {
 	ip := net.ParseIP(targetIPStr)
 	if ip == nil {
-		return ScanResult{}, errors.New("invalid format")
+		return ScanResult{}, errors.New("invalid IP format")
 	}
 
 	res := ScanResult{
@@ -466,6 +546,7 @@ func scanIP(targetIPStr string, tags []ServiceTag) (ScanResult, error) {
 			if subnet.Contains(ip) {
 				res.Matched = true
 				res.Tags = append(res.Tags, MatchedTag{
+					Cloud:         tag.Cloud,
 					Name:          tag.Name,
 					Region:        tag.Region,
 					MatchedRange:  prefix,
@@ -480,26 +561,29 @@ func scanIP(targetIPStr string, tags []ServiceTag) (ScanResult, error) {
 
 func printResultsTable(results []ScanResult) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(w, "TARGET IP\tSOURCE(S)\tAZURE?\tSERVICE TAG\tREGION\tSYSTEM SERVICE\tMATCHED CIDR")
-	fmt.Fprintln(w, "---------\t---------\t------\t-----------\t------\t--------------\t------------")
+	fmt.Fprintln(w, "TARGET IP\tSOURCE(S)\tCLOUD\tAZURE?\tSERVICE TAG\tREGION\tSYSTEM SERVICE\tMATCHED CIDR")
+	fmt.Fprintln(w, "---------\t---------\t-----\t------\t-----------\t------\t--------------\t------------")
 
-	for _, res := range results {
+	for i, res := range results {
 		sourcesStr := strings.Join(res.Sources, ", ")
 		if !res.Matched {
-			fmt.Fprintf(w, "%s\t%s\tNo\t-\t-\t-\t-\n", res.IP, sourcesStr)
-			continue
+			fmt.Fprintf(w, "%s\t%s\t-\tNo\t-\t-\t-\t-\n", res.IP, sourcesStr)
+		} else {
+			for _, tag := range res.Tags {
+				region := tag.Region
+				if region == "" {
+					region = "global"
+				}
+				svc := tag.SystemService
+				if svc == "" {
+					svc = "N/A"
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\tYes\t%s\t%s\t%s\t%s\n", res.IP, sourcesStr, tag.Cloud, tag.Name, region, svc, tag.MatchedRange)
+			}
 		}
 
-		for _, tag := range res.Tags {
-			region := tag.Region
-			if region == "" {
-				region = "global"
-			}
-			svc := tag.SystemService
-			if svc == "" {
-				svc = "N/A"
-			}
-			fmt.Fprintf(w, "%s\t%s\tYes\t%s\t%s\t%s\t%s\n", res.IP, sourcesStr, tag.Name, region, svc, tag.MatchedRange)
+		if i < len(results)-1 {
+			fmt.Fprintln(w, "---\t---\t---\t---\t---\t---\t---\t---")
 		}
 	}
 	w.Flush()
