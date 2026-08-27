@@ -513,12 +513,13 @@ func fetchTagsFromARM(ctx context.Context, subscriptionID, location string) ([]S
 	return tags, nil
 }
 
-func getCacheDir() (string, error) {
+// the downloaded files will be in ~/.cache/azureck
+func getCacheDir() (string, error) { 
 	userCache, err := os.UserCacheDir()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(userCache, "azure-ip-checker")
+	dir := filepath.Join(userCache, "azureck")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", err
 	}
