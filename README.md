@@ -4,6 +4,8 @@ A recon tool to map out IP addresses, domain names, or bulk target lists to offi
 
 It will do IP lookups, reverse DNS scans, and bulk enumeration queries to verify if incoming or outgoing traffic originates from legitimate Microsoft Azure infrastructure (such as Azure Blob Storage, Azure Front Door, or App Services, etc).
 
+For more info you can visit my site [HERE](https://vix-w1zzer.gitbook.io/vixwizzer/notes/cloud/azure/tool-azureck#authenticated-through-azure-api) I talked about available regions and some of my findings on why you'll likely to fail resolute restricted/private regions.
+
 ---
 
 ## Features
