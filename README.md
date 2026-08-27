@@ -74,7 +74,7 @@ az login
 # Standard query
 azureck -s "<your_subID>" -d 150.171.84.20
 
-# Sovereign cloud or region restricted policy query
+# Sovereign cloud or region restricted policy query, this will only work if your subID is based on usgov, same with other restricted regions
 azureck -s "<your_subID>" -l "usgovvirginia" -d 150.171.84.20
 ```
 
