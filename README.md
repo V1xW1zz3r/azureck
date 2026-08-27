@@ -4,7 +4,7 @@ A Go CLI tool to check if an IP address, domain, or target list belongs to Micro
 
 It will do IP lookups, reverse DNS scans, and bulk enumeration queries to verify if incoming or outgoing traffic originates from legitimate Microsoft Azure infrastructure (such as Azure Blob Storage, Azure Front Door, or App Services, etc).
 
-For more info you can visit my site [HERE](https://vix-w1zzer.gitbook.io/vixwizzer/notes/cloud/azure/tool-azureck#authenticated-through-azure-api) I talked about available regions and some of my findings on why you'll likely to fail resolute restricted/private regions.
+For more info you can visit my site [HERE](https://vix-w1zzer.gitbook.io/vixwizzer/notes/cloud/azure/tool-azureck#authenticated-through-azure-api) I talked about available regions and some of my findings on why you'll likely to fail resolve with restricted/private regions.
 
 ---
 
